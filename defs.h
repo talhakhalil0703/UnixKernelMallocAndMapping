@@ -69,6 +69,10 @@ void            kfree(char*);
 void            kinit1(void*, void*);
 void            kinit2(void*, void*);
 
+//kmalloc.c
+void            kmfree(void *ap);
+void*           kmalloc(uint nbytes);
+
 // kbd.c
 void            kbdintr(void);
 
