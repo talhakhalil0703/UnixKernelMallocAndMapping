@@ -139,6 +139,9 @@ userinit(void)
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
 
+  // No intial mappings
+  p->mappings = (struct mmap_data*) 0;
+
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
@@ -200,6 +203,7 @@ fork(void)
   np->parent = curproc;
   *np->tf = *curproc->tf;
 
+  np->mappings = curproc->mappings;
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
@@ -241,6 +245,9 @@ exit(void)
       curproc->ofile[fd] = 0;
     }
   }
+
+  // Clean up any mappings
+  clean_up_mappings();
 
   begin_op();
   iput(curproc->cwd);
@@ -532,3 +539,178 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+void
+dump_all_mappings()
+{
+  if (0) {
+    struct proc* curproc = myproc();
+    mmap_data * pointer = curproc->mappings;
+    cprintf("Proc Mappings, ");
+    while(pointer != (mmap_data*)0){
+      cprintf("%p, ",pointer->starting_address);
+      pointer = pointer->next;
+    }
+    cprintf("\n");
+  }
+}
+
+void
+clean_up_mappings(void)
+{
+  struct proc *curproc = myproc();
+  mmap_data* trailing_pointer = curproc->mappings;
+  mmap_data* map_pointer = curproc->mappings;
+
+  while(map_pointer != (struct mmap_data*)0){
+    trailing_pointer = map_pointer;
+    map_pointer = map_pointer->next;
+    kmfree(trailing_pointer);
+  }
+}
+
+void
+add_mapping_to_proc(mmap_data *data)
+{
+  // This is linear linked list
+  struct proc *curproc = myproc();
+
+  if (curproc->mappings == (mmap_data*) 0){
+    curproc->mappings = data;
+    data->next = (mmap_data*) 0;
+  } else {
+    mmap_data* placement_spot = curproc->mappings;
+    while(placement_spot->next != (mmap_data*) 0){
+      placement_spot = placement_spot->next;
+    }
+    //Next placement_spot is zero attach here
+    placement_spot->next = data;
+    data->next = (mmap_data*) 0;
+  }
+  // cprintf("Mapping added %p\n", data->starting_address);
+  dump_all_mappings();
+}
+
+mmap_data *
+remove_mapping_from_proc(void * data_address)
+{
+  struct proc *curproc = myproc();
+  mmap_data* trailing_pointer = curproc->mappings;
+  mmap_data* search_pointer = curproc->mappings;
+
+  while(search_pointer != (mmap_data*) 0){
+    if(search_pointer->starting_address == data_address){
+      // Return me and remove me
+      if (search_pointer == curproc->mappings){
+        curproc->mappings = search_pointer->next;
+      } else {
+        trailing_pointer->next = search_pointer->next;
+      }
+      dump_all_mappings();
+      return search_pointer;
+    }
+    trailing_pointer = search_pointer;
+    search_pointer = search_pointer->next;
+  }
+  dump_all_mappings();
+  return (mmap_data *) 0;
+}
+
+void
+dump_mmap_data(mmap_data* data)
+{
+    cprintf("Starting Address: %p \n", data->starting_address);
+    cprintf("Length: %d\n", data->length);
+    cprintf("Region Type: %d\n", data->region_type);
+    cprintf("Offset: %d\n", data->offset);
+}
+
+//User level call made?
+void*
+mmap(void * addr, int length, int prot, int flag, int fd, int offset)
+{
+  struct proc *curproc = myproc();
+  uint present = 0;
+  // Finding address, first page align the address the user provided
+  uint page_aligned_address = PGROUNDDOWN((uint) addr);
+  uint length_page_aligned = ((length/PGSIZE)+1)*PGSIZE;
+
+ if (addr != (void *) 0){
+
+  pte_t* pte;
+  for (uint i = page_aligned_address; i < page_aligned_address+length_page_aligned; i+= PGSIZE){
+    pte = walkpgdir(curproc->pgdir, (char*)i, 0);
+    if(*pte & PTE_P){
+      present = 1;
+    }
+  }
+ }
+
+  uint start_address;
+  uint end_address;
+  if (present == 0 && addr != (void *) 0)
+  {
+    start_address = page_aligned_address;
+  } else {
+    //We will choose the memory to allocate
+    start_address = PGROUNDUP(curproc->sz);
+  }
+
+  end_address = start_address + length_page_aligned;
+
+  // cprintf("Address page aligned %d\n", start_address%4096);
+  uint new_sz;
+  if((new_sz = allocuvm(curproc->pgdir, start_address, end_address)) == 0)
+  {
+    clean_up_mappings();
+    return (void *) -1;
+  }
+
+  memset((void*) start_address, 0, length_page_aligned);
+  // cprintf("Set memory to zero\n");
+
+  // If we allocated the memory for the user then move curproc sz
+  if (present == 0)
+    curproc->sz = new_sz;
+
+  mmap_data* new_mmap = kmalloc(sizeof(mmap_data));
+  new_mmap->starting_address = (void *) start_address;
+  new_mmap->length = (uint) length_page_aligned;
+  new_mmap->region_type = (char) 0;
+  new_mmap->offset = (uint) 0;
+  new_mmap->fd = (struct file*) 0;
+  add_mapping_to_proc(new_mmap);
+  // cprintf("Mapped address %p\n", (void *) sz);
+  // cprintf("Address page aligned %d\n", sz%4096);
+  return (void *) start_address;
+}
+
+int
+munmap(void *addr, uint length)
+{
+  // cprintf("Unmapping address %p\n", addr);
+  // Assume this is the same address and lenght as used by mmap
+  struct proc *curproc = myproc();
+  uint sz = -1;
+  mmap_data* mapping = remove_mapping_from_proc(addr);
+
+  if (mapping == (mmap_data*) 0){
+    // cprintf("No mapping found\n");
+    clean_up_mappings();
+    return -1;
+  }
+
+  length = mapping->length;
+  memset((void*) addr, 0, length);
+  if((sz = deallocuvm(curproc->pgdir, (uint) mapping->starting_address + mapping->length, (uint) mapping->starting_address)) == 0){
+    clean_up_mappings();
+    // cprintf("Could not deallocuvm\n");
+    return -1;
+  }
+
+  curproc->sz = sz;
+  // cprintf("Unmapped %p\n", addr);
+  kmfree(mapping);
+  return 0;
+}
+

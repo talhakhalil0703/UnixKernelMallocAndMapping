@@ -111,3 +111,56 @@ sys_kmfree(void)
     kmfree((void *)address_to_free);
     return 0;
 }
+
+int
+sys_mmap(void)
+{
+  // void *
+  int addr;
+  // int
+  int length;
+  // int
+  int prot;
+  // int
+  int flag;
+  // int
+  int fd;
+  // int
+  int offset;
+
+  // Read in all the arguments
+  if(argint(0, &addr) < 0)
+      return -1;
+  if(argint(1, &length) < 0)
+      return -1;
+  if(argint(2, &prot) < 0)
+      return -1;
+  if(argint(3, &flag) < 0)
+      return -1;
+  if(argint(4, &fd) < 0)
+      return -1;
+  if(argint(5, &offset) < 0)
+      return -1;
+  // Call mmap with the appropriate casts
+  void * ret = mmap((void *)addr, length, prot, flag, fd, offset);
+  // cprintf("Address page aligned %d\n", (uint)ret%4096);
+  return (int) ret;
+}
+
+int
+sys_munmap(void)
+{
+  // void *
+  int addr;
+  // int
+  int length;
+
+  // Read in all the arguments
+  if(argint(0, &addr) < 0)
+      return -1;
+  if(argint(1, &length) < 0)
+      return -1;
+
+  // Call munmap with the appropriate casts
+  return munmap((void *)addr, length);
+}

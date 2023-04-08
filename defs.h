@@ -9,6 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct mmap_data;
 
 // bio.c
 void            binit(void);
@@ -90,6 +91,11 @@ void            initlog(int dev);
 void            log_write(struct buf*);
 void            begin_op();
 void            end_op();
+
+// mmap.c
+void*           mmap(void * addr, int length, int prot, int flag, int fd, int offset);
+int             munmap(void *addr, uint length);
+void            clean_up_mappings(void);
 
 // mp.c
 extern int      ismp;
@@ -189,6 +195,7 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+pde_t*          walkpgdir(pde_t *pgdir, const void *va, int alloc);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

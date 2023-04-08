@@ -63,8 +63,9 @@ morecore()
 void*
 kmalloc(uint nbytes)
 {
-  //Panic if memory requested is greater than 4096 bytes (Page size)
-  if (nbytes > 4096)
+  // Panic if memory requested is greater than 4096 bytes (Page size)
+  // This check could be potentially incorrect?
+  if (nbytes > 4096- sizeof(Header))
     panic("Requested more than a page sized amount of memory");
   Header *p, *prevp;
   uint nunits;
